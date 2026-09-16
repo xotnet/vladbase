@@ -6,20 +6,24 @@ int main() {
 	char token[65] = "";
 	char data[8128] = "";
 	
-    for (int i = 0; i<128; ++i) { // creating 128 records
-		sprintf(token, "%d", i);
-		int data_len = sprintf(data, "%d", i*123);
-		db.add_record(token, data, data_len);
-	}
-	int status = db.read_record_with_offset("unexist record", data, 0, 32);
-	if (status == 0) {
-        printf("%s\n", data);
-    }
+	strcpy(token, "IsThere128Records?");
+	if (!db.is_record_exitst(token)) {
+		db.add_record(token, "Yes!", 4);
+		for (int i = 0; i<128; ++i) { // creating 128 records
+			sprintf(token, "%d", i);
+			int data_len = sprintf(data, "%d", i*123);
+			db.add_record(token, data, data_len);
+		}
+		int status = db.read_record_with_offset("unexist record", data, 0, 32);
+		if (status == 0) {
+			printf("%s\n", data);
+		}
 
-	db.print_data_base();
-    for (int i = 0; i<128; ++i) { // removing all this records
-		sprintf(token, "%d", i);
-		db.remove_record(token);
+		db.print_data_base();
+		for (int i = 0; i<128; ++i) { // removing all this records
+			sprintf(token, "%d", i);
+			db.remove_record(token);
+		}
 	}
 
     strcpy(token, "bible");

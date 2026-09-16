@@ -3,12 +3,13 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <vector>
 
 // [header_count] [blocks_start_ptr] [header - token:ptr][token:ptr][token:ptr] | [blockdata:ptr][block:ptr][block:ptr]
 // Token is unique byte array with size token_max_size
 
 namespace vladbase {
-const int token_max_size = 64;
+const int token_max_size = 32;
 const int block_data_size = 128;
 
 struct header_t {
@@ -35,21 +36,25 @@ struct database {
 	block_t block;
 	header_t head;
 
+	std::vector<int64_t> removed_headers;
+	std::vector<int64_t> removed_blocks;
+
     public:
 	database(const char* database_name_local);
 	~database();
 	int add_record(const char* token, const char* data, int data_size);
 	int write_to_record_end(const char* token, const char* data, int data_size);
 	int remove_record(const char* token);
-	int read_record(const char* token, char* output, int64_t data_size);
-	int read_record_with_offset(const char* token, char* output, int64_t offset, int64_t data_size);
+	int read_record(const char* token, char* output, int64_t output_size); // max read record size
+	int read_record_with_offset(const char* token, char* output, int64_t offset, int64_t output_size); // max read record size
 	void print_data_base();
 	bool is_record_exitst(const char* token);
     int64_t get_record_full_size(const char* token);
+	void wipe_removed_record();
 
     private:
     int64_t get_file_length();
-    int64_t create_or_get_free_block_ptr(prefix_t& prefix, int header_size);
+    int64_t create_or_get_free_block_ptr();
     int64_t get_header_offset(const char* token, int64_t ptr_in_head = -1);
     int64_t get_free_header();
 };
