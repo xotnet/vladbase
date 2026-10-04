@@ -37,6 +37,7 @@ struct database {
 	block_t block;
 	header_t head;
 	std::mutex lock;
+	bool is_prefix_varable_uptodate = false;
 
 	std::vector<int64_t> removed_headers;
 	std::vector<int64_t> removed_blocks;
@@ -60,5 +61,6 @@ struct database {
     int64_t create_or_get_free_block_ptr();
     int64_t get_header_offset(const char* token, int64_t ptr_in_head = -1);
     int64_t get_free_header();
+	void read_prefix();
 };
 } // end of namespace
