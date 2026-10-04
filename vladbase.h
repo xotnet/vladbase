@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <vector>
+#include <mutex>
 
 // [header_count] [blocks_start_ptr] [header - token:ptr][token:ptr][token:ptr] | [blockdata:ptr][block:ptr][block:ptr]
 // Token is unique byte array with size token_max_size
@@ -35,6 +36,7 @@ struct database {
 	prefix_t prefix;
 	block_t block;
 	header_t head;
+	std::mutex lock;
 
 	std::vector<int64_t> removed_headers;
 	std::vector<int64_t> removed_blocks;
@@ -51,6 +53,7 @@ struct database {
 	bool is_record_exitst(const char* token);
     int64_t get_record_full_size(const char* token);
 	void wipe_removed_record();
+	int get_token_by_id(char* token, int id);
 
     private:
     int64_t get_file_length();

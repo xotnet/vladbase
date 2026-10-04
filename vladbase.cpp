@@ -46,6 +46,7 @@ long int vladbase::database::get_file_length() {
 	return file_size;
 }
 int64_t vladbase::database::create_or_get_free_block_ptr() { // make block no more free | O(N) but if hold removed pointers in prefix then O(1)
+	std::lock_guard<std::mutex> mut(lock);
 	if (removed_blocks.size() > 0) {
 		int64_t ptr = removed_blocks.back();
 		removed_blocks.pop_back();
@@ -402,4 +403,15 @@ bool vladbase::database::is_record_exitst(const char* token) {
 	} else {
 		return true;
 	}
+}
+int vladbase::database::get_token_by_id(char* token, int id) {
+	fseek(f, 0, SEEK_SET);
+	fread((char*)&prefix, 1, sizeof(prefix), f);
+	if (prefix.headers_count <= id) {
+		return -1;
+	}
+	fseek(f, sizeof(prefix) + (sizeof(head)*id), SEEK_SET);
+	fread((char*)&head, 1, sizeof(head), f);
+	memcpy(token, head.token, token_max_size);
+	return 0;
 }
