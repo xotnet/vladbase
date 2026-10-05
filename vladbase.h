@@ -4,10 +4,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <vector>
-#include <mutex>
 
 // [header_count] [blocks_start_ptr] [header - token:ptr][token:ptr][token:ptr] | [blockdata:ptr][block:ptr][block:ptr]
 // Token is unique byte array with size token_max_size
+// Write and read depend only on how fast header finding, AND IT VERY FAST
 
 namespace vladbase {
 const int token_max_size = 32;
@@ -36,8 +36,6 @@ struct database {
 	prefix_t prefix;
 	block_t block;
 	header_t head;
-	std::mutex lock;
-	bool is_prefix_varable_uptodate = false;
 
 	std::vector<int64_t> removed_headers;
 	std::vector<int64_t> removed_blocks;
@@ -54,13 +52,23 @@ struct database {
 	bool is_record_exitst(const char* token);
     int64_t get_record_full_size(const char* token);
 	void wipe_removed_record();
-	int get_token_by_id(char* token, int id);
 
     private:
     int64_t get_file_length();
     int64_t create_or_get_free_block_ptr();
     int64_t get_header_offset(const char* token, int64_t ptr_in_head = -1);
     int64_t get_free_header();
-	void read_prefix();
 };
+
+struct format_field {
+	std::string format_data;
+	format_field();
+	format_field(char* data, int data_len);
+
+	void add_field(const char* name, const char* value, int value_size); // name must contain \0 at end
+	int find_field(const char* name);
+	std::string read_field(const char* name);
+	void remove_field(const char* name);
+};
+
 } // end of namespace

@@ -11,7 +11,7 @@ vladbase::database::database(const char* database_name_local) {
 		printf("Cant open database %s\n", database_name_local);
 		return;
 	}
-	buffer = (char*)malloc(1024*1024);
+	buffer = (char*)malloc(1024*1024); // 1Megabyte
 	if (buffer == NULL) {
 		printf("Cant alloc memory!\n");
 		return;
@@ -28,7 +28,6 @@ vladbase::database::database(const char* database_name_local) {
 			buffer_last_wrote_byte += sizeof(head);
 		}
 		fwrite(buffer, 1, buffer_last_wrote_byte, f);
-		is_prefix_varable_uptodate = false;
 	}
 }
 vladbase::database::~database() {
@@ -47,7 +46,6 @@ long int vladbase::database::get_file_length() {
 	return file_size;
 }
 int64_t vladbase::database::create_or_get_free_block_ptr() { // make block no more free | O(N) but if hold removed pointers in prefix then O(1)
-	std::lock_guard<std::mutex> mut(lock);
 	if (removed_blocks.size() > 0) {
 		int64_t ptr = removed_blocks.back();
 		removed_blocks.pop_back();
@@ -72,9 +70,10 @@ int64_t vladbase::database::create_or_get_free_block_ptr() { // make block no mo
 	return -1;
 }
 int64_t vladbase::database::get_header_offset(const char* token, int64_t ptr_in_head) { // get head ptr by token or ptr inside
-	read_prefix();
+	fseek(f, 0, SEEK_SET);
+	fread((char*)&prefix, 1, sizeof(prefix), f);
 	
-	int64_t read_headers_once_count = 32;
+	int64_t read_headers_once_count = 256; // this need read_headers_once_count * sizeof(head) ~12Kb
 	int remain_headers = prefix.headers_count;
 	for (int i = 0; i<prefix.headers_count; i += read_headers_once_count) {
 		int64_t offset = sizeof(prefix_t) + (sizeof(head) * i);
@@ -84,7 +83,7 @@ int64_t vladbase::database::get_header_offset(const char* token, int64_t ptr_in_
 		for (int x = 0; x<how_much_headers_read; ++x) {
 			memcpy(&head, buffer+(sizeof(head)*x), sizeof(head));
 			if (token != NULL) {
-				if (strncmp(head.token, token, token_max_size) == 0 && head.ptr != 0) {
+				if (head.ptr != 0 && strncmp(head.token, token, token_max_size) == 0) {
 					return offset+x*sizeof(head);
 				}
 			} else if (ptr_in_head != -1) {
@@ -104,7 +103,8 @@ int64_t vladbase::database::get_free_header() {
 		return ptr;
 	}
 
-	read_prefix();
+	fseek(f, 0, SEEK_SET);
+	fread((char*)&prefix, 1, sizeof(prefix), f);
 
 	int64_t read_headers_once_count = 32;
 	int remain_headers = prefix.headers_count;
@@ -129,7 +129,8 @@ int vladbase::database::add_record(const char* token, const char* data, int data
 	if (data_size <= 0) {
 		return -2;
 	}
-	read_prefix();
+	fseek(f, 0, SEEK_SET);
+	fread((char*)&prefix, 1, sizeof(prefix), f);
 	//printf("Headers count is %d\n", prefix.headers_count);
 	int64_t thisHeaderPtr = get_free_header();
 	if (thisHeaderPtr != -1) {
@@ -167,7 +168,8 @@ int vladbase::database::add_record(const char* token, const char* data, int data
 		// to move we need clear first block and move its data to end, then change prewious block ptr to new
 		//printf("Moving first block\n");
 		// get first block
-		read_prefix();
+		fseek(f, 0, SEEK_SET);
+		fread((char*)&prefix, 1, sizeof(prefix), f);
 		fseek(f, prefix.blocks_start, SEEK_SET);
 		fread((char*)&block, 1, sizeof(block), f);
 
@@ -219,7 +221,6 @@ int vladbase::database::add_record(const char* token, const char* data, int data
 		prefix.blocks_start += sizeof(block);
 		//printf("Now blocks start is %d\n", prefix.blocks_start);
 		fwrite((char*)&prefix, 1, sizeof(prefix), f);
-		is_prefix_varable_uptodate = false;
 
 		goto _start;
 	}
@@ -369,7 +370,8 @@ int vladbase::database::write_to_record_end(const char* token, const char* data,
 	return 0;
 }
 void vladbase::database::print_data_base() {
-	read_prefix();
+	fseek(f, 0, SEEK_SET);
+	fread((char*)&prefix, 1, sizeof(prefix), f);
 	printf("Printing FULL DATABASE [%ld headers]\n", prefix.headers_count);
 	for (int i = 0; i<prefix.headers_count; ++i) {
 		fseek(f, sizeof(prefix) + sizeof(head) * i, SEEK_SET);
@@ -401,21 +403,68 @@ bool vladbase::database::is_record_exitst(const char* token) {
 		return true;
 	}
 }
-int vladbase::database::get_token_by_id(char* token, int id) {
-	read_prefix();
-	if (prefix.headers_count <= id) {
-		return -1;
-	}
-	fseek(f, sizeof(prefix) + (sizeof(head)*id), SEEK_SET);
-	fread((char*)&head, 1, sizeof(head), f);
-	memcpy(token, head.token, token_max_size);
-	return 0;
-}
 
-void vladbase::database::read_prefix() {
-	if (is_prefix_varable_uptodate == false) {
-		fseek(f, 0, SEEK_SET);
-		fread((char*)&prefix, 1, sizeof(prefix), f);
-		is_prefix_varable_uptodate = true;
+vladbase::format_field::format_field(char* data, int data_len) {
+	format_data.append(data, data_len);
+}
+vladbase::format_field::format_field() {}
+
+void vladbase::format_field::add_field(const char* name, const char* value, int value_size) { // name must contain \0 at end
+	format_data.append(name, strlen(name));
+	format_data.push_back('\0');
+	format_data.append((char*)&value_size, sizeof(value_size));
+	format_data.append(value, value_size);
+}
+int vladbase::format_field::find_field(const char* name) {
+	for (int i = 0; i<format_data.size();) {
+		bool right_name = false;
+		int this_name_length = 0;
+		for (int u = i; format_data[u] != 0; ++u) {
+			this_name_length += 1;
+		}
+		if (strcmp(format_data.c_str() + i, name) == 0) {
+			return i;
+		}
+		i += this_name_length + 1; // with \0
+		int value_size = 0;
+		for (int z = 0; z < sizeof(value_size); ++z) {
+			char* ptr = (char*)&value_size;
+			ptr[z] = format_data[i+z];
+		}
+		i += sizeof(value_size);
+		i += value_size;
 	}
+	return -1;
+}
+std::string vladbase::format_field::read_field(const char* name) {
+	std::string ret = "";
+	int offset = find_field(name);
+	if (offset == -1) {
+		return ret;
+	}
+	offset += strlen(name) + 1;
+	int value_size = 0;
+	for (int z = 0; z < sizeof(value_size); ++z) {
+		char* ptr = (char*)&value_size;
+		ptr[z] = format_data[offset+z];
+	}
+	offset += sizeof(value_size);
+	ret.append(format_data.c_str() + offset, value_size);
+	return ret;
+}
+void vladbase::format_field::remove_field(const char* name) {
+	int offset = find_field(name);
+	if (offset == -1) {
+		return;
+	}
+	int move_to = offset;
+	offset += strlen(name) + 1;
+	int value_size = 0;
+	for (int z = 0; z < sizeof(value_size); ++z) {
+		char* ptr = (char*)&value_size;
+		ptr[z] = format_data[offset+z];
+	}
+	offset += sizeof(value_size);
+	offset += value_size;
+	format_data.erase(move_to, offset-move_to);
 }
