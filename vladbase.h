@@ -1,9 +1,11 @@
+#pragma once
 #include <stdio.h>
 #include <string>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <vector>
+#include <mutex>
 
 // [header_count] [blocks_start_ptr] [header - token:ptr][token:ptr][token:ptr] | [blockdata:ptr][block:ptr][block:ptr]
 // Token is unique byte array with size token_max_size
@@ -36,6 +38,9 @@ struct database {
 	prefix_t prefix;
 	block_t block;
 	header_t head;
+	bool is_prefix_up_to_date = false;
+
+	std::mutex mut;
 
 	std::vector<int64_t> removed_headers;
 	std::vector<int64_t> removed_blocks;
@@ -54,6 +59,7 @@ struct database {
 	void wipe_removed_record();
 
     private:
+	void read_prefix();
     int64_t get_file_length();
     int64_t create_or_get_free_block_ptr();
     int64_t get_header_offset(const char* token, int64_t ptr_in_head = -1);

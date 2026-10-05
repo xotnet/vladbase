@@ -28,6 +28,7 @@ vladbase::database::database(const char* database_name_local) {
 			buffer_last_wrote_byte += sizeof(head);
 		}
 		fwrite(buffer, 1, buffer_last_wrote_byte, f);
+		is_prefix_up_to_date = false;
 	}
 }
 vladbase::database::~database() {
@@ -70,8 +71,7 @@ int64_t vladbase::database::create_or_get_free_block_ptr() { // make block no mo
 	return -1;
 }
 int64_t vladbase::database::get_header_offset(const char* token, int64_t ptr_in_head) { // get head ptr by token or ptr inside
-	fseek(f, 0, SEEK_SET);
-	fread((char*)&prefix, 1, sizeof(prefix), f);
+	read_prefix();
 	
 	int64_t read_headers_once_count = 256; // this need read_headers_once_count * sizeof(head) ~12Kb
 	int remain_headers = prefix.headers_count;
@@ -103,8 +103,7 @@ int64_t vladbase::database::get_free_header() {
 		return ptr;
 	}
 
-	fseek(f, 0, SEEK_SET);
-	fread((char*)&prefix, 1, sizeof(prefix), f);
+	read_prefix();
 
 	int64_t read_headers_once_count = 32;
 	int remain_headers = prefix.headers_count;
@@ -129,8 +128,7 @@ int vladbase::database::add_record(const char* token, const char* data, int data
 	if (data_size <= 0) {
 		return -2;
 	}
-	fseek(f, 0, SEEK_SET);
-	fread((char*)&prefix, 1, sizeof(prefix), f);
+	read_prefix();
 	//printf("Headers count is %d\n", prefix.headers_count);
 	int64_t thisHeaderPtr = get_free_header();
 	if (thisHeaderPtr != -1) {
@@ -168,8 +166,7 @@ int vladbase::database::add_record(const char* token, const char* data, int data
 		// to move we need clear first block and move its data to end, then change prewious block ptr to new
 		//printf("Moving first block\n");
 		// get first block
-		fseek(f, 0, SEEK_SET);
-		fread((char*)&prefix, 1, sizeof(prefix), f);
+		read_prefix();
 		fseek(f, prefix.blocks_start, SEEK_SET);
 		fread((char*)&block, 1, sizeof(block), f);
 
@@ -181,13 +178,13 @@ int vladbase::database::add_record(const char* token, const char* data, int data
 
 		// change ptr's
 		int head_point_to_removed_block = get_header_offset(NULL, prefix.blocks_start);
-		if (head_point_to_removed_block != -1) { // its first data block
+		if (head_point_to_removed_block != -1) { // its first data block | point from header
 			fseek(f, head_point_to_removed_block, SEEK_SET);
 			fread((char*)&head, 1, sizeof(head), f);
 			head.ptr = file_size;
 			fseek(f, head_point_to_removed_block, SEEK_SET);
 			fwrite((char*)&head, 1, sizeof(head), f);
-		} else { // its not first data block, finding in blocks space
+		} else { // its not first data block, finding in blocks space | point from another block
 			for (int64_t block_may_use_first_block = prefix.blocks_start + sizeof(block); block_may_use_first_block < file_size; block_may_use_first_block += sizeof(block)) {
 				fseek(f, block_may_use_first_block, SEEK_SET);
 				fread((char*)&block, 1, sizeof(block), f);
@@ -221,6 +218,8 @@ int vladbase::database::add_record(const char* token, const char* data, int data
 		prefix.blocks_start += sizeof(block);
 		//printf("Now blocks start is %d\n", prefix.blocks_start);
 		fwrite((char*)&prefix, 1, sizeof(prefix), f);
+		is_prefix_up_to_date = false;
+		removed_blocks.clear();
 
 		goto _start;
 	}
@@ -370,8 +369,7 @@ int vladbase::database::write_to_record_end(const char* token, const char* data,
 	return 0;
 }
 void vladbase::database::print_data_base() {
-	fseek(f, 0, SEEK_SET);
-	fread((char*)&prefix, 1, sizeof(prefix), f);
+	read_prefix();
 	printf("Printing FULL DATABASE [%ld headers]\n", prefix.headers_count);
 	for (int i = 0; i<prefix.headers_count; ++i) {
 		fseek(f, sizeof(prefix) + sizeof(head) * i, SEEK_SET);
@@ -404,10 +402,19 @@ bool vladbase::database::is_record_exitst(const char* token) {
 	}
 }
 
+void vladbase::database::read_prefix() {
+	if (is_prefix_up_to_date == false) {
+		fseek(f, 0, SEEK_SET);
+		fread((char*)&prefix, 1, sizeof(prefix), f);
+		is_prefix_up_to_date = true;
+	}
+}
+
+vladbase::format_field::format_field() {}
+
 vladbase::format_field::format_field(char* data, int data_len) {
 	format_data.append(data, data_len);
 }
-vladbase::format_field::format_field() {}
 
 void vladbase::format_field::add_field(const char* name, const char* value, int value_size) { // name must contain \0 at end
 	format_data.append(name, strlen(name));
@@ -436,6 +443,7 @@ int vladbase::format_field::find_field(const char* name) {
 	}
 	return -1;
 }
+
 std::string vladbase::format_field::read_field(const char* name) {
 	std::string ret = "";
 	int offset = find_field(name);
