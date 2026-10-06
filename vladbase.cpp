@@ -32,8 +32,12 @@ vladbase::database::database(const char* database_name_local) {
 	}
 }
 vladbase::database::~database() {
+	printf("Closing database!\n");
 	if (buffer != NULL) {
 		free(buffer);
+	}
+	if (f != NULL) {
+		fclose(f);
 	}
 }
 long int vladbase::database::get_file_length() {
@@ -48,12 +52,16 @@ long int vladbase::database::get_file_length() {
 }
 int64_t vladbase::database::create_or_get_free_block_ptr() { // make block no more free | O(N) but if hold removed pointers in prefix then O(1)
 	if (removed_blocks.size() > 0) {
-		int64_t ptr = removed_blocks.back();
+		int64_t pointer = removed_blocks.back();
+		fseek(f, pointer, SEEK_SET);
+		block.ptr = 0;
+		fwrite((char*)&block, 1, sizeof(block), f);
 		removed_blocks.pop_back();
-		return ptr;
+		return pointer;
 	}
+	int file_length = get_file_length();
 	for (int64_t pointer = prefix.blocks_start; ; pointer += sizeof(block)) {
-		if (pointer == get_file_length()) {
+		if (pointer == file_length) {
 			fseek(f, pointer, SEEK_SET);
 			block.ptr = 0;
 			fwrite((char*)&block, 1, sizeof(block), f);
@@ -83,7 +91,7 @@ int64_t vladbase::database::get_header_offset(const char* token, int64_t ptr_in_
 		for (int x = 0; x<how_much_headers_read; ++x) {
 			memcpy(&head, buffer+(sizeof(head)*x), sizeof(head));
 			if (token != NULL) {
-				if (head.ptr != 0 && strncmp(head.token, token, token_max_size) == 0) {
+				if (head.ptr != 0 && memcmp(head.token, token, token_max_size) == 0) {
 					return offset+x*sizeof(head);
 				}
 			} else if (ptr_in_head != -1) {
