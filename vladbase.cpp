@@ -41,15 +41,11 @@ vladbase::database::~database() {
 	}
 }
 long int vladbase::database::get_file_length() {
-	if (fseek(f, 0, SEEK_END) != 0) {
-		printf("fseek error\n");
-	}
+	fseek(f, 0, SEEK_END);
 	long int file_size = ftell(f);
-	if (fseek(f, 0, SEEK_SET) != 0) {
-		printf("Reset seek err\n");
-	}
 	return file_size;
 }
+
 int64_t vladbase::database::create_or_get_free_block_ptr() { // make block no more free | O(N) but if hold removed pointers in prefix then O(1)
 	if (removed_blocks.size() > 0) {
 		int64_t pointer = removed_blocks.back();
@@ -59,24 +55,33 @@ int64_t vladbase::database::create_or_get_free_block_ptr() { // make block no mo
 		removed_blocks.pop_back();
 		return pointer;
 	}
+	read_prefix();
 	int file_length = get_file_length();
-	for (int64_t pointer = prefix.blocks_start; ; pointer += sizeof(block)) {
-		if (pointer == file_length) {
-			fseek(f, pointer, SEEK_SET);
-			block.ptr = 0;
-			fwrite((char*)&block, 1, sizeof(block), f);
-			return pointer;
+	int read_blocks_once_count = 256;
+	int blocks_total = (file_length - (file_length - prefix.blocks_start)) / sizeof(block);
+	for (int i = 0; i<blocks_total;) {
+		int how_much_blocks_read = blocks_total > read_blocks_once_count ? read_blocks_once_count : blocks_total;
+
+		fseek(f, prefix.blocks_start + sizeof(block) * i, SEEK_SET);
+		fread(buffer, 1, sizeof(block) * how_much_blocks_read, f);
+		for (int z = 0; z<how_much_blocks_read; ++z) {
+			memcpy(&block, buffer+(sizeof(block)*z), sizeof(block));
+			if (block.ptr == -1) {
+				int64_t pointer = prefix.blocks_start + (i+z)*sizeof(block);
+				fseek(f, pointer, SEEK_SET); 
+				block.ptr = 0;
+				fwrite((char*)&block, 1, sizeof(block), f);
+				return pointer;
+			}
 		}
-		fseek(f, pointer, SEEK_SET);
-		fread((char*)&block, 1, sizeof(block), f);
-		if (block.ptr == -1) {
-			fseek(f, pointer, SEEK_SET); 
-			block.ptr = 0;
-			fwrite((char*)&block, 1, sizeof(block), f);
-			return pointer;
-		}
+		
+		blocks_total -= how_much_blocks_read;
+		i += how_much_blocks_read;
 	}
-	return -1;
+	fseek(f, file_length, SEEK_SET);
+	block.ptr = 0;
+	fwrite((char*)&block, 1, sizeof(block), f);
+	return file_length;
 }
 int64_t vladbase::database::get_header_offset(const char* token, int64_t ptr_in_head) { // get head ptr by token or ptr inside
 	read_prefix();
@@ -133,7 +138,7 @@ int64_t vladbase::database::get_free_header() {
 }
 int vladbase::database::add_record(const char* token, const char* data, int data_size) {
 	_start:
-	if (data_size <= 0) {
+	if (data_size < 0) {
 		return -2;
 	}
 	read_prefix();
@@ -337,6 +342,7 @@ int vladbase::database::read_record_with_offset(const char* token, char* output,
 	}
 	return 0;
 }
+
 int vladbase::database::write_to_record_end(const char* token, const char* data, int data_size) {
 	int64_t token_header = get_header_offset(token);
 	if (token_header == -1) {
@@ -344,7 +350,7 @@ int vladbase::database::write_to_record_end(const char* token, const char* data,
 	}
 	fseek(f, token_header, SEEK_SET);
 	fread((char*)&head, 1, sizeof(head), f);
-
+	
 	int alredy_wrote_in_block = 0;
 	int64_t last_next_block_holder = -1; // block that was next in last iteration
 	int offset = head.full_data_size % block_data_size;
