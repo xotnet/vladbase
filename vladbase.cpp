@@ -275,31 +275,20 @@ int64_t vladbase::database::get_record_full_size(const char* token) {
 	fread((char*)&head, 1, sizeof(head), f);
 	return head.full_data_size;
 }
-int vladbase::database::read_record(const char* token, char* output, int64_t data_size) {
+int vladbase::database::change_token(char* token, char* new_token) {
 	int64_t token_header = get_header_offset(token);
 	if (token_header == -1) {
 		return -1;
 	}
 	fseek(f, token_header, SEEK_SET);
 	fread((char*)&head, 1, sizeof(head), f);
-	data_size = data_size > head.full_data_size ? head.full_data_size : data_size; // limit for record self size
-	int64_t next = head.ptr;
-	int64_t written_to_output = 0;
-	while (next >= 0) {
-		fseek(f, next, SEEK_SET);
-		fread((char*)&block, 1, sizeof(block), f);
-		next = block.ptr;
-		int will_be_written = (data_size) > block_data_size ? block_data_size : data_size;
-		memcpy(output+written_to_output, block.data, will_be_written);
-		written_to_output += will_be_written;
-		data_size -= will_be_written;
-		if (next == 0 || data_size == 0) {
-			break;
-		}
-	}
+	memcpy(head.token, new_token, token_max_size);
+	fseek(f, token_header, SEEK_SET);
+	fwrite((char*)&head, 1, sizeof(head), f);
 	return 0;
 }
 int vladbase::database::read_record_with_offset(const char* token, char* output, int64_t offset, int64_t data_size) {
+	// add read 16 blocks once, if any was read, then good, it will be very fast!
 	int64_t token_header = get_header_offset(token);
 	if (token_header == -1) {
 		return -1;
@@ -342,7 +331,9 @@ int vladbase::database::read_record_with_offset(const char* token, char* output,
 	}
 	return 0;
 }
-
+int vladbase::database::read_record(const char* token, char* output, int64_t data_size) {
+	return read_record_with_offset(token, output, 0, data_size);
+}
 int vladbase::database::write_to_record_end(const char* token, const char* data, int data_size) {
 	int64_t token_header = get_header_offset(token);
 	if (token_header == -1) {
